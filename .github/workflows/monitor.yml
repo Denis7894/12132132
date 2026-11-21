@@ -1,0 +1,48 @@
+name: Проверка сайта
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Отправить пробное сообщение в бот"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ["monitor/**", ".github/workflows/monitor.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: site-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Проверить сайт
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          FORCE_TEST: ${{ (inputs.test || contains(github.event.head_commit.message, '[пробное]')) && '1' || '' }}
+        run: python3 monitor/check.py
+
+      - name: Сохранить состояние
+        if: always()
+        run: |
+          if git diff --quiet -- monitor/state.json; then exit 0; fi
+          git config user.name "site-monitor"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add monitor/state.json
+          git commit -m "Состояние проверки сайта"
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
